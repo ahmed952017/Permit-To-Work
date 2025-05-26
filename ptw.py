@@ -3,13 +3,35 @@ import pandas as pd
 import os
 from datetime import datetime
 
+# --- Login System ---
+def login():
+    st.title("🔐 Work Permit System - Login")
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
+
+        if submitted:
+            if username in ["user", "supervisor"] and password == "123456":
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.experimental_rerun() # Use st.rerun() for newer Streamlit versions
+            else:
+                st.error("Invalid username or password")
+
+# --- Check Login Status ---
+if "logged_in" not in st.session_state or not st.session_state.logged_in:
+    login()
+    st.stop()
+
 # --- Configuration ---
 DATA_FILE = "work_permits.csv"
 
 # --- Dropdown Options ---
-WORK_TYPES = ["", "Hot Work", "Confined Space Entry", "Working at Height", "Electrical Work", "Excavation", "General Maintenance", "Other"]
-# Filter out the initial empty string for multiselect, but keep "Other" as a distinct choice.
-PRECAUTIONS_OPTIONS = ["Use Standard PPE", "Lockout/Tagout Required", "Fire Watch Required", "Atmospheric Testing Needed", "Ventilation Required", "Buddy System Mandatory", "Fall Protection Required", "Other (Specify in Description)"]
+WORK_TYPES = ["","High Pressure", "Hot Work", "Confined Space Entry", "Working at Height", "Electrical Work", "Excavation", "General Maintenance", "Other"]
+PRECAUTIONS_OPTIONS = ["Specified tems", "Use Standard PPE", "Lockout/Tagout Required", "Fire Watch Required", "Atmospheric Testing Needed", "Ventilation Required", "Buddy System Mandatory", "Fall Protection Required", "Other (Specify in Description)"]
+LIKELIHOOD_OPTIONS = [str(i) for i in range(1, 6)]
+SEVERITY_OPTIONS = [str(i) for i in range(1, 6)]
 
 # Define expected columns and their types
 EXPECTED_COLUMNS = {
@@ -30,7 +52,6 @@ EXPECTED_COLUMNS = {
 
 # --- Helper Functions ---
 def load_data():
-    """Loads permit data from the CSV file, ensuring all columns exist."""
     if os.path.exists(DATA_FILE):
         try:
             df = pd.read_csv(DATA_FILE, dtype=str, keep_default_na=False)
@@ -50,7 +71,6 @@ def load_data():
         return pd.DataFrame(columns=list(EXPECTED_COLUMNS.keys()))
 
 def save_data(df):
-    """Saves permit data to the CSV file."""
     try:
         df_to_save = df[list(EXPECTED_COLUMNS.keys())].copy()
         df_to_save.to_csv(DATA_FILE, index=False)
@@ -58,12 +78,10 @@ def save_data(df):
         st.error(f"Error saving data: {e}")
 
 def generate_permit_id():
-    """Generates a unique permit ID based on timestamp."""
-    return f"WP-{datetime.now().strftime("%Y%m%d%H%M%S%f")}"
+    return f"WP-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
 
 # --- Risk Assessment Helper Functions ---
 def get_risk_level_and_color(risk_score_int):
-    """Determines risk level and color based on the score."""
     if not isinstance(risk_score_int, int):
         return "Invalid", "gray", 0
     if 1 <= risk_score_int <= 4:
@@ -77,7 +95,6 @@ def get_risk_level_and_color(risk_score_int):
     return level, color
 
 def calculate_risk_assessment_details(likelihood_str, severity_str):
-    """Calculates risk score (int), level (str), and color (str)."""
     try:
         l, s = int(likelihood_str), int(severity_str)
         risk_score_int = l * s if (1 <= l <= 5 and 1 <= s <= 5) else 0
@@ -94,54 +111,54 @@ if 'df_permits' not in st.session_state:
 st.set_page_config(layout="wide")
 st.title("Work Permit System")
 
-# --- Sidebar for Navigation/Actions ---
+# --- Display logged in user ---
+st.sidebar.header(f"Logged in as: {st.session_state.username}")
+
+# --- Sidebar for Navigation/Actions based on login role ---
 st.sidebar.header("Actions")
-app_mode = st.sidebar.selectbox("Choose Mode", ["Issue New Permit", "Review Permits", "View All Permits"], key="app_mode_select")
+
+# Determine available options based on login role
+if st.session_state.username == "user":
+    # Regular user can only issue new permits
+    app_mode = "Issue New Permit"  # Default and only option
+    st.sidebar.info("You are logged in as a regular user. You can issue new work permits.")
+elif st.session_state.username == "supervisor":
+    # Supervisor can issue, review, and view all permits
+    app_mode = st.sidebar.selectbox(
+        "Choose Mode", 
+        ["Issue New Permit", "Review Permits", "View All Permits"], 
+        key="app_mode_select"
+    )
+    st.sidebar.info("You are logged in as a supervisor. You can issue, review, and view all permits.")
+else:
+    # Fallback for any unexpected username
+    app_mode = "Issue New Permit"
+    st.sidebar.warning("Unknown user role. Limited access provided.")
+
+# Add logout button
+if st.sidebar.button("Logout"):
+    # Clear session state and rerun to show login screen
+    st.session_state.clear()
+    st.experimental_rerun()
 
 # --- Issue New Permit ---
 if app_mode == "Issue New Permit":
     st.header("Issue a New Work Permit")
+
+    # Initialize session state for likelihood and severity if they don't exist
+    if "likelihood_new" not in st.session_state:
+        st.session_state.likelihood_new = "1"  # Default value
+    if "severity_new" not in st.session_state:
+        st.session_state.severity_new = "1"    # Default value
+
     with st.form("permit_form", clear_on_submit=True):
-        requester = st.text_input("Requester Name", key="requester_name_new")
-        location = st.text_input("Work Location", key="location_new")
-        work_type = st.selectbox("Work Type", options=WORK_TYPES, key="work_type_new", index=0)
-        description = st.text_area("Work Description", key="description_new")
+        st.subheader("Step 1: Provide Permit Details")
+        requester = st.text_input("Requester Name", key="requester_name_form_input")
+        location = st.text_input("Work Location", key="location_form_input")
+        work_type = st.selectbox("Work Type", options=WORK_TYPES, key="work_type_form_input", index=0)
+        description = st.text_area("Work Description", key="description_form_input")
 
-        st.subheader("Risk Assessment")
-        col_l, col_s = st.columns(2)
-        with col_l:
-            likelihood_val_str = st.selectbox("Likelihood (1-5)", options=[str(i) for i in range(1, 6)], key="likelihood_new", index=0)
-        with col_s:
-            severity_val_str = st.selectbox("Severity (1-5)", options=[str(i) for i in range(1, 6)], key="severity_new", index=0)
-
-        risk_score_val_int, risk_level_val, risk_color_val = calculate_risk_assessment_details(likelihood_val_str, severity_val_str)
-        st.markdown(f"**Calculated Risk Score:** <span style='color:{risk_color_val}; font-size: 1.2em; font-weight:bold;'>{risk_score_val_int}</span> (<span style='color:{risk_color_val}; font-weight:bold;'>{risk_level_val}</span>)", unsafe_allow_html=True)
-
-        st.markdown("---_Risk Matrix Visual_---")
-        matrix_html = "<style> table.risk-matrix { border-collapse: collapse; text-align: center; margin-top:10px; } .risk-matrix th, .risk-matrix td { border: 1px solid #ccc; padding: 8px; } .risk-matrix .sev-header { writing-mode: vertical-rl; text-orientation: mixed; text-align:center; font-weight:bold; } .risk-matrix .lik-header { font-weight:bold; } </style>"
-        matrix_html += "<table class='risk-matrix'>"
-        matrix_html += "<tr><td rowspan='7' class='sev-header'>Severity →</td><td></td><td colspan='5' class='lik-header'>Likelihood →</td></tr>"
-        matrix_html += "<tr><td></td>"
-        for l_header in range(1, 6):
-            matrix_html += f"<td class='lik-header'>{l_header}</td>"
-        matrix_html += "</tr>"
-        for s_loop in range(5, 0, -1):
-            matrix_html += f"<tr><td class='sev-header' style='padding-right:10px; padding-left:5px;'>{s_loop}</td>"
-            for l_loop in range(1, 6):
-                cell_score = s_loop * l_loop
-                _, cell_color = get_risk_level_and_color(cell_score)
-                cell_style = f"background-color:{cell_color}; color: {'white' if cell_color in ['#dc3545','#28a745'] else 'black'};"
-                try:
-                    if int(likelihood_val_str) == l_loop and int(severity_val_str) == s_loop:
-                        cell_style += " border: 3px solid black; font-weight: bold;"
-                except ValueError: pass
-                matrix_html += f"<td style='{cell_style}'>{cell_score}</td>"
-            matrix_html += "</tr>"
-        matrix_html += "</table>"
-        st.markdown(matrix_html, unsafe_allow_html=True)
-        st.markdown("---")
-
-        st.subheader("Precautions")
+        st.subheader("Step 2: Specify Precautions")
         selected_precautions = st.multiselect("Select Precautions (Multiple Choice Allowed)", options=PRECAUTIONS_OPTIONS, key="precautions_multiselect_new")
         other_precautions_details = ""
         if "Other (Specify in Description)" in selected_precautions:
@@ -150,7 +167,7 @@ if app_mode == "Issue New Permit":
                 key="other_precautions_text_new",
                 placeholder="Enter details for other precautions"
             )
-
+        
         submitted = st.form_submit_button("Submit Permit Request")
 
         if submitted:
@@ -172,8 +189,7 @@ if app_mode == "Issue New Permit":
                         final_precautions_list.append(p_item)
             
             if not final_precautions_list and not ("Other (Specify in Description)" in selected_precautions and other_precautions_details):
-                 # This condition might need refinement based on whether any precaution is mandatory
-                 if not selected_precautions: # If nothing is selected at all
+                 if not selected_precautions:
                     error_messages.append("At least one precaution must be selected, or 'Other' specified.")
 
             if error_messages:
@@ -184,13 +200,28 @@ if app_mode == "Issue New Permit":
                 issue_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 precautions_to_save = ", ".join(final_precautions_list) if final_precautions_list else "None specified"
 
+                # Get Likelihood, Severity, and calculate Risk Assessment from session state for saving
+                current_likelihood_for_saving = st.session_state.likelihood_new
+                current_severity_for_saving = st.session_state.severity_new
+                risk_score_for_saving, _, _ = calculate_risk_assessment_details(
+                    current_likelihood_for_saving,
+                    current_severity_for_saving
+                )
+
                 new_permit_data = {
-                    "Permit ID": permit_id, "Requester": requester, "Location": location,
-                    "Work Type": work_type, "Description": description, "Likelihood": likelihood_val_str,
-                    "Severity": severity_val_str, "Risk Assessment": str(risk_score_val_int),
+                    "Permit ID": permit_id, 
+                    "Requester": requester,
+                    "Location": location,
+                    "Work Type": work_type,
+                    "Description": description,
+                    "Likelihood": current_likelihood_for_saving,
+                    "Severity": current_severity_for_saving,
+                    "Risk Assessment": str(risk_score_for_saving),
                     "Precautions": precautions_to_save,
-                    "Issue Date": issue_date, "Status": "Pending",
-                    "Supervisor Notes": "", "Supervisor Action Date": ""
+                    "Issue Date": issue_date, 
+                    "Status": "Pending",
+                    "Supervisor Notes": "", 
+                    "Supervisor Action Date": ""
                 }
                 for col_expected in EXPECTED_COLUMNS.keys():
                     if col_expected not in new_permit_data: new_permit_data[col_expected] = ""
@@ -200,6 +231,51 @@ if app_mode == "Issue New Permit":
                 st.session_state.df_permits = pd.concat([st.session_state.df_permits, new_permit_df_row], ignore_index=True)
                 save_data(st.session_state.df_permits)
                 st.success(f"Permit {permit_id} submitted successfully! The form has been cleared.")
+                
+                # Reset the dynamic likelihood and severity selectors to default for the next permit
+                st.session_state.likelihood_new = "1"
+                st.session_state.severity_new = "1"
+                # No st.rerun() here, form clear_on_submit and session state reset should handle it.
+
+    # --- Risk Assessment Section (OUTSIDE and AFTER the form) ---
+    st.subheader("Step 3: Select Risk Parameters") 
+    col_l, col_s = st.columns(2)
+    with col_l:
+        st.selectbox("Likelihood (1-5)", options=LIKELIHOOD_OPTIONS, key="likelihood_new")
+    with col_s:
+        st.selectbox("Severity (1-5)", options=SEVERITY_OPTIONS, key="severity_new")
+
+    st.subheader("Step 4: View Calculated Risk") 
+    # Dynamic calculation and display using current values from session state
+    risk_score_val_int, risk_level_val, risk_color_val = calculate_risk_assessment_details(
+        st.session_state.likelihood_new,
+        st.session_state.severity_new
+    )
+    st.markdown(f"**Calculated Risk Score:** <span style='color:{risk_color_val}; font-size: 1.2em; font-weight:bold;'>{risk_score_val_int}</span> (<span style='color:{risk_color_val}; font-weight:bold;'>{risk_level_val}</span>)", unsafe_allow_html=True)
+
+    st.markdown("---_Risk Matrix Visual_---")
+    matrix_html = "<style> table.risk-matrix { border-collapse: collapse; text-align: center; margin-top:10px; } .risk-matrix th, .risk-matrix td { border: 1px solid #ccc; padding: 8px; } .risk-matrix .sev-header { writing-mode: vertical-rl; text-orientation: mixed; text-align:center; font-weight:bold; } .risk-matrix .lik-header { font-weight:bold; } </style>"
+    matrix_html += "<table class='risk-matrix'>"
+    matrix_html += "<tr><td rowspan='7' class='sev-header'>Severity →</td><td></td><td colspan='5' class='lik-header'>Likelihood →</td></tr>"
+    matrix_html += "<tr><td></td>"
+    for l_header in range(1, 6):
+        matrix_html += f"<td class='lik-header'>{l_header}</td>"
+    matrix_html += "</tr>"
+    for s_loop in range(5, 0, -1):
+        matrix_html += f"<tr><td class='sev-header' style='padding-right:10px; padding-left:5px;'>{s_loop}</td>"
+        for l_loop in range(1, 6):
+            cell_score = s_loop * l_loop
+            _, cell_color = get_risk_level_and_color(cell_score)
+            cell_style = f"background-color:{cell_color}; color: {'white' if cell_color in ['#dc3545','#28a745'] else 'black'};"
+            try:
+                if int(st.session_state.likelihood_new) == l_loop and int(st.session_state.severity_new) == s_loop:
+                    cell_style += " border: 3px solid black; font-weight: bold;"
+            except ValueError: pass
+            matrix_html += f"<td style='{cell_style}'>{cell_score}</td>"
+        matrix_html += "</tr>"
+    matrix_html += "</table>"
+    st.markdown(matrix_html, unsafe_allow_html=True)
+    st.markdown("---")
 
 # --- Review Permits ---
 elif app_mode == "Review Permits":
@@ -230,7 +306,7 @@ elif app_mode == "Review Permits":
                     rev_score_int, rev_level, rev_color = calculate_risk_assessment_details(rev_likelihood, rev_severity)
                     displayed_rev_score = permit_details.get("Risk Assessment", str(rev_score_int))
                     st.markdown(f"**Risk Assessment:** <span style='color:{rev_color};'>{displayed_rev_score} ({rev_level})</span>", unsafe_allow_html=True)
-                    st.text_area("Precautions", value=permit_details.get("Precautions",""), disabled=True, height=100, key=f"rev_prec_{permit_details['Permit ID']}") # Displays as saved string
+                    st.text_area("Precautions", value=permit_details.get("Precautions",""), disabled=True, height=100, key=f"rev_prec_{permit_details['Permit ID']}")
                     st.text_input("Issue Date", value=permit_details.get("Issue Date",""), disabled=True, key=f"rev_idate_{permit_details['Permit ID']}")
                     st.text_input("Current Status", value=permit_details.get("Status",""), disabled=True, key=f"rev_stat_{permit_details['Permit ID']}")
 
@@ -249,21 +325,61 @@ elif app_mode == "Review Permits":
                             st.session_state.df_permits.loc[permit_index, "Supervisor Notes"] = supervisor_notes
                             st.session_state.df_permits.loc[permit_index, "Supervisor Action Date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             save_data(st.session_state.df_permits)
-                            st.success(f"Permit {selected_permit_id} rejected."); st.rerun()
+                            st.warning(f"Permit {selected_permit_id} rejected. Please ensure notes explain why."); st.rerun()
                         else:
-                            st.warning("Supervisor notes are required to reject a permit.")
-            except IndexError: st.error("Could not find the selected permit.")
-            except Exception as e: st.error(f"An error occurred: {e}")
+                            st.error("Supervisor notes are required to reject a permit.")
+            except IndexError:
+                st.error("Could not find the selected permit. It might have been removed or an error occurred.")
+            except Exception as e:
+                st.error(f"An error occurred while reviewing the permit: {e}")
+
 
 # --- View All Permits ---
 elif app_mode == "View All Permits":
-    st.header("All Work Permits")
-    df_view_all = st.session_state.df_permits.copy()
-    if df_view_all.empty:
-        st.info("No work permits found.")
+    st.header("\U0001F4CA Work Permit Analytics Dashboard")
+
+    if st.session_state.df_permits.empty:
+        st.info("No work permits have been issued yet.")
     else:
-        df_display_all = df_view_all[list(EXPECTED_COLUMNS.keys())].copy()
-        st.dataframe(df_display_all, use_container_width=True)
-        if st.button("Refresh Data", key="refresh_view_all"): 
-            st.session_state.df_permits = load_data(); st.rerun()
+        df_display = st.session_state.df_permits.copy()
+        for col in EXPECTED_COLUMNS.keys():
+            if col not in df_display.columns:
+                df_display[col] = ""
+
+        st.subheader("Permit Summary Metrics")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Permits", len(df_display))
+        col2.metric("Pending", len(df_display[df_display["Status"] == "Pending"]))
+        col3.metric("Approved", len(df_display[df_display["Status"] == "Approved"]))
+        col4.metric("Rejected", len(df_display[df_display["Status"] == "Rejected"]))
+
+        # Risk Level Aggregation
+        def map_risk_level(row):
+            try:
+                score = int(row["Risk Assessment"])
+                level, _ = get_risk_level_and_color(score)
+                return level
+            except:
+                return "Invalid"
+
+        df_display["Risk Level"] = df_display.apply(map_risk_level, axis=1)
+        risk_counts = df_display["Risk Level"].value_counts()
+
+        st.subheader("Permits by Risk Level")
+        st.bar_chart(risk_counts)
+
+        # Time Series Chart of Permit Issuance
+        st.subheader("Permits Issued Over Time")
+        df_display["Issue Date"] = pd.to_datetime(df_display["Issue Date"], errors='coerce')
+        permits_by_date = df_display.groupby(df_display["Issue Date"].dt.date).size()
+        st.line_chart(permits_by_date)
+
+        # Export
+        st.subheader("Export Permit Data")
+        csv = df_display.to_csv(index=False).encode('utf-8')
+        st.download_button("Download CSV", data=csv, file_name='work_permits_export.csv', mime='text/csv')
+
+        # Full Table
+        st.subheader("Full Permit Data Table")
+        st.dataframe(df_display[list(EXPECTED_COLUMNS.keys()) + ["Risk Level"]])
 
