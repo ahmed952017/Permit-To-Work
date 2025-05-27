@@ -363,3 +363,4 @@ if st.sidebar.checkbox("Show Raw Permit Data Table"):
         if col not in display_df.columns:
             display_df[col] = ""
     st.dataframe(display_df[list(EXPECTED_COLUMNS.keys())])
+
