@@ -15,7 +15,7 @@ def login():
             if username in ["user", "supervisor"] and password == "123456":
                 st.session_state.logged_in = True
                 st.session_state.username = username
-                st.experimental_rerun() # Use st.rerun() for newer Streamlit versions
+                st.rerun() # Use st.rerun() for newer Streamlit versions
             else:
                 st.error("Invalid username or password")
 
@@ -139,7 +139,7 @@ else:
 if st.sidebar.button("Logout"):
     # Clear session state and rerun to show login screen
     st.session_state.clear()
-    st.experimental_rerun()
+    st.rerun()
 
 # --- Issue New Permit ---
 if app_mode == "Issue New Permit":
@@ -308,78 +308,58 @@ elif app_mode == "Review Permits":
                     st.markdown(f"**Risk Assessment:** <span style='color:{rev_color};'>{displayed_rev_score} ({rev_level})</span>", unsafe_allow_html=True)
                     st.text_area("Precautions", value=permit_details.get("Precautions",""), disabled=True, height=100, key=f"rev_prec_{permit_details['Permit ID']}")
                     st.text_input("Issue Date", value=permit_details.get("Issue Date",""), disabled=True, key=f"rev_idate_{permit_details['Permit ID']}")
-                    st.text_input("Current Status", value=permit_details.get("Status",""), disabled=True, key=f"rev_stat_{permit_details['Permit ID']}")
+                
+                st.markdown("---Supervisor Review Section---")
+                with st.form(f"review_form_{permit_details['Permit ID']}"):
+                    supervisor_notes = st.text_area("Supervisor Notes/Opinion", key=f"notes_rev_{permit_details['Permit ID']}")
+                    approve_button = st.form_submit_button("Approve Permit")
+                    reject_button = st.form_submit_button("Reject Permit")
 
-                with st.form(f"review_form_{permit_details['Permit ID']}", clear_on_submit=True):
-                    supervisor_notes = st.text_area("Supervisor Notes", key=f"supervisor_notes_{permit_details['Permit ID']}")
-                    approve_button, reject_button = st.columns(2)
-                    if approve_button.form_submit_button("Approve Permit"):
+                    if approve_button:
+                        action_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         st.session_state.df_permits.loc[permit_index, "Status"] = "Approved"
                         st.session_state.df_permits.loc[permit_index, "Supervisor Notes"] = supervisor_notes if supervisor_notes else "Approved without notes."
-                        st.session_state.df_permits.loc[permit_index, "Supervisor Action Date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        st.session_state.df_permits.loc[permit_index, "Supervisor Action Date"] = action_date
                         save_data(st.session_state.df_permits)
-                        st.success(f"Permit {selected_permit_id} approved."); st.rerun()
-                    if reject_button.form_submit_button("Reject Permit"):
+                        st.success(f"Permit {selected_permit_id} Approved.")
+                        st.rerun()
+                    
+                    if reject_button:
                         if supervisor_notes:
+                            action_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             st.session_state.df_permits.loc[permit_index, "Status"] = "Rejected"
                             st.session_state.df_permits.loc[permit_index, "Supervisor Notes"] = supervisor_notes
-                            st.session_state.df_permits.loc[permit_index, "Supervisor Action Date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            st.session_state.df_permits.loc[permit_index, "Supervisor Action Date"] = action_date
                             save_data(st.session_state.df_permits)
-                            st.warning(f"Permit {selected_permit_id} rejected. Please ensure notes explain why."); st.rerun()
+                            st.success(f"Permit {selected_permit_id} Rejected.")
+                            st.rerun()
                         else:
-                            st.error("Supervisor notes are required to reject a permit.")
+                            st.warning("Supervisor notes are required for rejection.")
             except IndexError:
-                st.error("Could not find the selected permit. It might have been removed or an error occurred.")
-            except Exception as e:
-                st.error(f"An error occurred while reviewing the permit: {e}")
-
+                st.error("Could not find the selected permit. It might have been removed or changed.")
+                st.rerun()
+            except Exception as e_review:
+                st.error(f"An unexpected error occurred during review: {e_review}")
+                # Optionally log the full traceback here for debugging
 
 # --- View All Permits ---
 elif app_mode == "View All Permits":
-    st.header("\U0001F4CA Work Permit Analytics Dashboard")
-
-    if st.session_state.df_permits.empty:
-        st.info("No work permits have been issued yet.")
+    st.header("All Permits Overview")
+    df_permits_all = st.session_state.df_permits
+    if df_permits_all.empty:
+        st.info("No permits have been issued yet.")
     else:
-        df_display = st.session_state.df_permits.copy()
-        for col in EXPECTED_COLUMNS.keys():
-            if col not in df_display.columns:
-                df_display[col] = ""
+        st.dataframe(df_permits_all)
+        # Optional: Add more detailed view similar to display_permits_with_feedback if needed
+        # for index, row in df_permits_all.iterrows():
+        #     with st.expander(f"Permit ID: {row['Permit ID']} - Status: {row['Status']}"):
+        #         st.write(row)
 
-        st.subheader("Permit Summary Metrics")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Permits", len(df_display))
-        col2.metric("Pending", len(df_display[df_display["Status"] == "Pending"]))
-        col3.metric("Approved", len(df_display[df_display["Status"] == "Approved"]))
-        col4.metric("Rejected", len(df_display[df_display["Status"] == "Rejected"]))
-
-        # Risk Level Aggregation
-        def map_risk_level(row):
-            try:
-                score = int(row["Risk Assessment"])
-                level, _ = get_risk_level_and_color(score)
-                return level
-            except:
-                return "Invalid"
-
-        df_display["Risk Level"] = df_display.apply(map_risk_level, axis=1)
-        risk_counts = df_display["Risk Level"].value_counts()
-
-        st.subheader("Permits by Risk Level")
-        st.bar_chart(risk_counts)
-
-        # Time Series Chart of Permit Issuance
-        st.subheader("Permits Issued Over Time")
-        df_display["Issue Date"] = pd.to_datetime(df_display["Issue Date"], errors='coerce')
-        permits_by_date = df_display.groupby(df_display["Issue Date"].dt.date).size()
-        st.line_chart(permits_by_date)
-
-        # Export
-        st.subheader("Export Permit Data")
-        csv = df_display.to_csv(index=False).encode('utf-8')
-        st.download_button("Download CSV", data=csv, file_name='work_permits_export.csv', mime='text/csv')
-
-        # Full Table
-        st.subheader("Full Permit Data Table")
-        st.dataframe(df_display[list(EXPECTED_COLUMNS.keys()) + ["Risk Level"]])
-
+# --- Display Raw Data Table (Optional) ---
+if st.sidebar.checkbox("Show Raw Permit Data Table"):
+    st.subheader("Raw Data Table")
+    display_df = st.session_state.df_permits.copy()
+    for col in EXPECTED_COLUMNS.keys():
+        if col not in display_df.columns:
+            display_df[col] = ""
+    st.dataframe(display_df[list(EXPECTED_COLUMNS.keys())])
